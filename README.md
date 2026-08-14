@@ -1,6 +1,18 @@
 # J.A.R.V.I.S 语音助手
 
-Just A Rather Very Intelligent System —— 一个受钢铁侠启发的全息语音助手。
+> Just A Rather Very Intelligent System.
+
+一个受《钢铁侠》启发的**本地化智能语音助手**：内置本地唤醒词检测、 faster-whisper 语音识别、DeepSeek 大模型对话、edge-tts 语音合成与全息 HUD 界面，支持 macOS 桌面应用打包。所有语音处理优先在本地运行，大模型通过 DeepSeek API 接入，兼顾隐私与智能。
+
+## 核心特性
+
+- 🎙 **多方式唤醒**：支持 "Hey Jarvis"（openWakeWord 本地模型）以及 "Hi Jarvis" / "Jarvis" / "贾维斯"（STT 关键词降级）
+- 🗣 **中英混合识别**：基于 faster-whisper，自动识别中文与英文输入
+- 🧠 **大模型对话**：接入 DeepSeek API，可选 `deepseek-v4-flash` / `deepseek-v4-pro`
+- 🔊 **科幻音色 TTS**：edge-tts + pydub 后期电子音效，低延迟、未来感
+- 🖥 **全息 HUD 界面**：单文件原生 HTML/CSS/Canvas，无需构建工具
+- ⏹ **随时打断**：说话时说出命令词即可强制打断，用户优先级最高
+- 📦 **macOS 桌面版**：一键打包为 `.app`，自包含、无需浏览器
 
 ## 项目结构
 
