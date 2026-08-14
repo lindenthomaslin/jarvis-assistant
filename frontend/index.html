@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S</title>
+    <style>
+        /* ===== 基础重置与变量 ===== */
+        :root {
+            --cyan: #00f0ff;
+            --ice-blue: #6ee7ff;
+            --neon-blue: #0066ff;
+            --dark-bg: #030508;
+            --panel-bg: rgba(0, 102, 255, 0.04);
+            --glow: 0 0 20px rgba(0, 240, 255, 0.6), 0 0 60px rgba(0, 102, 255, 0.3);
+            --text-glow: 0 0 10px rgba(0, 240, 255, 0.8);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--dark-bg);
+            color: var(--cyan);
+            font-family: 'Courier New', 'SF Mono', monospace;
+            user-select: none;
+        }
+
+        /* ===== 背景层 ===== */
+        #bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+
+        /* 扫描线 */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 240, 255, 0.03) 0px,
+                rgba(0, 240, 255, 0.03) 1px,
+                transparent 1px,
+                transparent 4px
+            );
+            pointer-events: none;
+            z-index: 10;
+            animation: scanMove 8s linear infinite;
+        }
+
+        @keyframes scanMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100px; }
+        }
+
+        /* 全息噪点 */
+        .noise {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.04;
+            pointer-events: none;
+            z-index: 11;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
+
+        /* ===== HUD 布局层 ===== */
+        .hud-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* 四角边框 */
+        .corner {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 2px solid rgba(0, 240, 255, 0.4);
+        }
+        .corner::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--cyan);
+        }
+        .corner.tl { top: 30px; left: 30px; border-right: none; border-bottom: none; }
+        .corner.tl::before { top: -2px; left: -2px; border-right: none; border-bottom: none; }
+        .corner.tr { top: 30px; right: 30px; border-left: none; border-bottom: none; }
+        .corner.tr::before { top: -2px; right: -2px; border-left: none; border-bottom: none; }
+        .corner.bl { bottom: 30px; left: 30px; border-right: none; border-top: none; }
+        .corner.bl::before { bottom: -2px; left: -2px; border-right: none; border-top: none; }
+        .corner.br { bottom: 30px; right: 30px; border-left: none; border-top: none; }
+        .corner.br::before { bottom: -2px; right: -2px; border-left: none; border-top: none; }
+
+        /* 顶部信息栏 */
+        .top-bar {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+        }
+        .top-bar .title {
+            font-size: 14px;
+            letter-spacing: 8px;
+            color: rgba(0, 240, 255, 0.7);
+            text-transform: uppercase;
+        }
+        .top-bar .subtitle {
+            font-size: 10px;
+            letter-spacing: 4px;
+            color: rgba(0, 240, 255, 0.4);
+            margin-top: 4px;
+        }
+
+        /* 状态指示 */
+        .status-ring {
+            position: absolute;
+            top: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 20px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            background: rgba(0, 240, 255, 0.05);
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan);
+            transition: all 0.3s ease;
+        }
+        .status-dot.listening { animation: pulse 1s ease-in-out infinite; background: #00ff88; box-shadow: 0 0 15px #00ff88; }
+        .status-dot.thinking { animation: spin 1.5s linear infinite; background: #ffaa00; box-shadow: 0 0 15px #ffaa00; border-radius: 0; }
+        .status-dot.speaking { animation: pulse 0.4s ease-in-out infinite; background: var(--cyan); }
+        .status-dot.wake { animation: pulse 0.2s ease-in-out 5; background: #ffffff; }
+        .status-text {
+            font-size: 12px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--cyan);
+            text-shadow: var(--text-glow);
+            min-width: 140px;
+            text-align: center;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 核心容器 */
+        .core-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 420px;
+            height: 420px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 频谱环 */
+        .spectrum-ring {
+            position: absolute;
+            width: 520px;
+            height: 520px;
+        }
+
+        /* 对话区域 */
+        .dialogue-panel {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(800px, 90vw);
+            max-height: 220px;
+            overflow: hidden;
+            padding: 20px;
+            border-left: 2px solid rgba(0, 240, 255, 0.3);
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.05), transparent);
+            pointer-events: auto;
+        }
+        .dialogue-line {
+            margin-bottom: 14px;
+            font-size: 15px;
+            line-height: 1.6;
+            opacity: 0;
+            animation: fadeIn 0.5s ease forwards;
+        }
+        .dialogue-line.user {
+            color: rgba(0, 240, 255, 0.7);
+            text-shadow: 0 0 5px rgba(0, 240, 255, 0.3);
+        }
+        .dialogue-line.jarvis {
+            color: #e0f7ff;
+            text-shadow: var(--text-glow);
+        }
+        .dialogue-line .label {
+            font-size: 10px;
+            letter-spacing: 2px;
+            opacity: 0.6;
+            margin-right: 8px;
+            text-transform: uppercase;
+        }
+        .typing-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background: var(--cyan);
+            margin-left: 4px;
+            animation: blink 0.7s step-end infinite;
+            vertical-align: middle;
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 底部状态栏 */
+        .bottom-bar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 40px;
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: rgba(0, 240, 255, 0.5);
+        }
+        .bottom-bar span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .bottom-bar .indicator {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(0, 240, 255, 0.3);
+        }
+        .bottom-bar .indicator.active { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+        /* 唤醒提示 */
+        .wake-hint {
+            position: absolute;
+            bottom: 320px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            letter-spacing: 4px;
+            color: rgba(0, 240, 255, 0.35);
+            text-transform: uppercase;
+            transition: opacity 0.5s;
+        }
+
+        /* 侧边数据装饰 */
+        .side-data {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 180px;
+            font-size: 9px;
+            letter-spacing: 1px;
+            color: rgba(0, 240, 255, 0.25);
+            line-height: 1.8;
+        }
+        .side-data.left { left: 50px; text-align: left; }
+        .side-data.right { right: 50px; text-align: right; }
+
+        /* ===== MARK VII 全息界面 ===== */
+        :root {
+            --cyan: #49f6ff;
+            --ice-blue: #c8fbff;
+            --neon-blue: #087cff;
+            --deep-blue: #02152b;
+            --dark-bg: #01040a;
+            --panel-bg: rgba(3, 20, 38, 0.62);
+            --line: rgba(73, 246, 255, 0.22);
+            --line-hot: rgba(73, 246, 255, 0.68);
+            --muted: rgba(157, 229, 242, 0.48);
+            --state-color: #49f6ff;
+            --glow: 0 0 20px rgba(73, 246, 255, 0.5), 0 0 70px rgba(8, 124, 255, 0.24);
+        }
+
+        body {
+            background:
+                radial-gradient(circle at 50% 42%, rgba(4, 75, 122, 0.14), transparent 36%),
+                linear-gradient(180deg, #020711 0%, #01040a 68%, #020813 100%);
+            font-family: "SFMono-Regular", "Roboto Mono", "Courier New", monospace;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            background:
+                linear-gradient(90deg, rgba(0, 0, 0, 0.46), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.46)),
+                radial-gradient(ellipse at center, transparent 36%, rgba(0, 0, 0, 0.66) 100%);
+        }
+
+        .scanlines {
+            opacity: 0.56;
+            background: repeating-linear-gradient(0deg, rgba(73, 246, 255, 0.025) 0, rgba(73, 246, 255, 0.025) 1px, transparent 1px, transparent 5px);
+            mix-blend-mode: screen;
+        }
+
+        .noise { opacity: 0.025; }
+
+        .hex-field {
+            position: fixed;
+            inset: 0;
+            z-index: 2;
+            pointer-events: none;
+            opacity: 0.14;
+            background-image:
+                linear-gradient(30deg, rgba(73,246,255,.1) 12%, transparent 12.5%, transparent 87%, rgba(73,246,255,.1) 87.5%),
+                linear-gradient(150deg, rgba(73,246,255,.1) 12%, transparent 12.5%, transparent 87%, rgba(73,246,255,.1) 87.5%),
+                linear-gradient(30deg, rgba(73,246,255,.1) 12%, transparent 12.5%, transparent 87%, rgba(73,246,255,.1) 87.5%),
+                linear-gradient(150deg, rgba(73,246,255,.1) 12%, transparent 12.5%, transparent 87%, rgba(73,246,255,.1) 87.5%),
+                linear-gradient(60deg, rgba(8,124,255,.12) 25%, transparent 25.5%, transparent 75%, rgba(8,124,255,.12) 75%);
+            background-size: 54px 94px;
+            background-position: 0 0, 0 0, 27px 47px, 27px 47px, 0 0;
+            mask-image: radial-gradient(circle at 50% 48%, transparent 0 24%, #000 65%, transparent 100%);
+        }
+
+        .hud-layer { z-index: 5; }
+
+        .corner {
+            width: 108px;
+            height: 108px;
+            border-color: rgba(73, 246, 255, 0.22);
+            filter: drop-shadow(0 0 8px rgba(73, 246, 255, 0.28));
+        }
+        .corner::after {
+            content: "";
+            position: absolute;
+            width: 34px;
+            height: 1px;
+            background: var(--line-hot);
+            box-shadow: 0 0 10px var(--state-color);
+        }
+        .corner.tl::after { top: 11px; left: 17px; }
+        .corner.tr::after { top: 11px; right: 17px; }
+        .corner.bl::after { bottom: 11px; left: 17px; }
+        .corner.br::after { bottom: 11px; right: 17px; }
+
+        .top-bar {
+            top: 26px;
+            width: min(680px, 62vw);
+        }
+        .top-bar::before,
+        .top-bar::after {
+            content: "";
+            position: absolute;
+            top: 19px;
+            width: 25%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--line-hot));
+        }
+        .top-bar::before { right: calc(100% + 24px); }
+        .top-bar::after { left: calc(100% + 24px); transform: scaleX(-1); }
+        .top-bar .title {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 12px;
+            color: var(--ice-blue);
+            text-shadow: 0 0 8px rgba(73,246,255,.9), 0 0 30px rgba(8,124,255,.6);
+        }
+        .top-bar .subtitle { margin-top: 7px; font-size: 8px; letter-spacing: 5px; }
+
+        .top-meta {
+            position: absolute;
+            top: 30px;
+            display: flex;
+            gap: 18px;
+            align-items: center;
+            font-size: 8px;
+            letter-spacing: 2px;
+            color: var(--muted);
+        }
+        .top-meta.left { left: 62px; }
+        .top-meta.right { right: 62px; text-align: right; }
+        .meta-index { color: var(--cyan); text-shadow: var(--text-glow); }
+
+        .status-ring {
+            top: 84px;
+            min-width: 300px;
+            justify-content: center;
+            padding: 8px 22px;
+            border: 1px solid var(--line);
+            border-radius: 2px;
+            background: linear-gradient(90deg, transparent, rgba(5, 32, 53, 0.82), transparent);
+            clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+            backdrop-filter: blur(10px);
+        }
+        .status-ring::before,
+        .status-ring::after {
+            content: "";
+            width: 34px;
+            height: 1px;
+            background: var(--state-color);
+            box-shadow: 0 0 8px var(--state-color);
+            opacity: .55;
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--state-color) !important;
+            box-shadow: 0 0 12px var(--state-color) !important;
+        }
+        .status-text { min-width: 130px; color: var(--ice-blue); font-size: 10px; }
+
+        .core-container {
+            width: min(620px, 62vw);
+            height: min(620px, 62vw);
+            max-width: 620px;
+            max-height: 620px;
+            pointer-events: auto;
+            cursor: crosshair;
+            transition: filter .6s ease;
+            filter: drop-shadow(0 0 22px color-mix(in srgb, var(--state-color) 32%, transparent));
+        }
+        .spectrum-ring { width: 100%; height: 100%; }
+
+        .core-readout {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 168px;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: var(--ice-blue);
+            text-shadow: 0 0 10px var(--state-color);
+        }
+        .core-readout .core-id { font-size: 8px; letter-spacing: 4px; color: var(--muted); }
+        .core-readout .core-state { margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: 4px; }
+        .core-readout .core-message {
+            margin-top: 7px;
+            min-height: 22px;
+            font-size: 8px;
+            line-height: 1.5;
+            letter-spacing: 1px;
+            color: rgba(200,251,255,.62);
+        }
+
+        .orbit-label {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            font-size: 7px;
+            letter-spacing: 2px;
+            color: var(--muted);
+            white-space: nowrap;
+            transform-origin: 0 0;
+        }
+        .orbit-label.a { transform: rotate(-35deg) translateX(245px) rotate(35deg); }
+        .orbit-label.b { transform: rotate(132deg) translateX(244px) rotate(-132deg); }
+        .orbit-label::before { content: "◈"; margin-right: 6px; color: var(--state-color); }
+
+        .hud-panel {
+            position: absolute;
+            top: 50%;
+            width: min(230px, 20vw);
+            min-height: 218px;
+            transform: translateY(-50%);
+            padding: 18px 18px 16px;
+            border-top: 1px solid var(--line-hot);
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(120deg, rgba(5, 29, 48, .62), rgba(1, 9, 18, .18));
+            backdrop-filter: blur(8px);
+            color: rgba(200,251,255,.74);
+            font-size: 9px;
+            letter-spacing: 1px;
+            line-height: 1.4;
+        }
+        .hud-panel::before {
+            content: "";
+            position: absolute;
+            top: -4px;
+            width: 46px;
+            height: 7px;
+            border-top: 1px solid var(--state-color);
+            border-bottom: 1px solid var(--line);
+        }
+        .hud-panel.left { left: 48px; text-align: left; }
+        .hud-panel.left::before { left: 0; }
+        .hud-panel.right { right: 48px; text-align: left; }
+        .hud-panel.right::before { right: 0; }
+        .panel-title {
+            display: flex;
+            justify-content: space-between;
+            padding-bottom: 10px;
+            margin-bottom: 13px;
+            border-bottom: 1px solid var(--line);
+            color: var(--ice-blue);
+            font-size: 9px;
+            letter-spacing: 3px;
+        }
+        .panel-title span:last-child { color: var(--state-color); }
+        .metric { margin: 10px 0; }
+        .metric-line { display: flex; justify-content: space-between; color: var(--muted); }
+        .metric-line strong { color: rgba(200,251,255,.84); font-weight: 400; }
+        .meter { height: 3px; margin-top: 5px; overflow: hidden; background: rgba(73,246,255,.08); }
+        .meter i {
+            display: block;
+            width: 0;
+            height: 100%;
+            background: linear-gradient(90deg, var(--neon-blue), var(--state-color));
+            box-shadow: 0 0 8px var(--state-color);
+            transition: width .8s cubic-bezier(.2,.8,.2,1);
+        }
+        .module-list { display: grid; gap: 8px; }
+        .module-row { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
+        .module-row b { color: rgba(200,251,255,.78); font-weight: 400; }
+        .module-led { width: 5px; height: 5px; border-radius: 50%; background: rgba(73,246,255,.2); }
+        .module-led.active { background: var(--state-color); box-shadow: 0 0 8px var(--state-color); }
+        .reasoning-feed {
+            margin-top: 14px;
+            padding: 9px 0 0 10px;
+            border-left: 1px solid var(--line);
+            color: rgba(157,229,242,.42);
+            font-size: 8px;
+            line-height: 1.55;
+            max-height: 58px;
+            overflow: hidden;
+        }
+
+        .dialogue-panel {
+            bottom: 76px;
+            width: min(820px, 70vw);
+            max-height: 146px;
+            padding: 14px 20px 12px 24px;
+            border: 0;
+            border-top: 1px solid var(--line);
+            border-bottom: 1px solid rgba(73,246,255,.1);
+            background: linear-gradient(90deg, transparent, rgba(3, 22, 38, .72) 12%, rgba(3, 22, 38, .72) 88%, transparent);
+            backdrop-filter: blur(9px);
+            mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+        }
+        .dialogue-panel::before {
+            content: "SECURE COMMUNICATION // TRANSCRIPT";
+            display: block;
+            margin-bottom: 8px;
+            font-size: 7px;
+            letter-spacing: 3px;
+            color: rgba(73,246,255,.3);
+        }
+        .dialogue-line { margin-bottom: 8px; font-size: 12px; line-height: 1.45; }
+        .dialogue-line .label { display: inline-block; min-width: 64px; color: var(--state-color); }
+
+        .wake-hint { bottom: 236px; font-size: 8px; letter-spacing: 3px; color: rgba(157,229,242,.44); }
+        .wake-hint kbd {
+            margin: 0 5px;
+            padding: 2px 6px;
+            border: 1px solid var(--line);
+            color: var(--cyan);
+            font: inherit;
+        }
+
+        .bottom-bar {
+            bottom: 27px;
+            width: min(880px, 78vw);
+            justify-content: center;
+            gap: clamp(18px, 4vw, 56px);
+            padding-top: 9px;
+            border-top: 1px solid rgba(73,246,255,.14);
+            font-size: 8px;
+        }
+        .bottom-bar .indicator { width: 5px; height: 5px; }
+        .bottom-bar .indicator.active { background: var(--state-color); box-shadow: 0 0 9px var(--state-color); }
+
+        .toast {
+            position: absolute;
+            top: 128px;
+            left: 50%;
+            max-width: min(560px, 80vw);
+            padding: 7px 16px;
+            transform: translate(-50%, -8px);
+            border-left: 1px solid var(--state-color);
+            border-right: 1px solid var(--state-color);
+            background: rgba(2, 15, 27, .82);
+            color: rgba(200,251,255,.72);
+            font-size: 8px;
+            letter-spacing: 2px;
+            opacity: 0;
+            transition: opacity .25s, transform .25s;
+        }
+        .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+        .boot-curtain {
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            pointer-events: none;
+            background: radial-gradient(circle at center, rgba(1,4,10,.08) 0 18%, rgba(1,4,10,.76) 70%, #01040a 100%);
+            transition: opacity .8s ease, visibility .8s;
+        }
+        .boot-curtain.done { opacity: 0; visibility: hidden; }
+
+        body[data-state="listening"] { --state-color: #4dffbd; }
+        body[data-state="thinking"] { --state-color: #ffc45a; }
+        body[data-state="speaking"] { --state-color: #8be9ff; }
+        body[data-state="wake"] { --state-color: #ffffff; }
+        body[data-state="disconnected"] { --state-color: #ff5b76; }
+
+        @media (max-width: 1080px) {
+            .hud-panel { width: 190px; }
+            .hud-panel.left { left: 26px; }
+            .hud-panel.right { right: 26px; }
+            .core-container { width: 54vw; height: 54vw; }
+            .orbit-label { display: none; }
+        }
+
+        @media (max-width: 820px) {
+            .top-meta, .hud-panel.right { display: none; }
+            .hud-panel.left {
+                top: auto;
+                bottom: 214px;
+                left: 18px;
+                width: 150px;
+                min-height: 0;
+                padding: 10px 12px;
+                transform: none;
+            }
+            .hud-panel.left .metric { margin: 6px 0; }
+            .core-container { top: 43%; width: 86vw; height: 86vw; }
+            .dialogue-panel { width: 94vw; bottom: 64px; }
+            .wake-hint { bottom: 202px; }
+            .bottom-bar { width: 94vw; gap: 14px; }
+            .bottom-bar span:nth-child(3) { display: none; }
+            .top-bar { width: 80vw; }
+            .top-bar .title { font-size: 14px; letter-spacing: 8px; }
+        }
+
+        @media (max-height: 720px) {
+            .core-container { top: 45%; width: min(490px, 60vw); height: min(490px, 60vw); }
+            .hud-panel { top: 45%; }
+            .wake-hint { display: none; }
+            .dialogue-panel { max-height: 108px; bottom: 58px; }
+            .bottom-bar { bottom: 16px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+            .scanlines { animation: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景 Canvas：粒子、核心、波纹 -->
+    <canvas id="bg-canvas"></canvas>
+
+    <!-- 扫描线与噪点 -->
+    <div class="hex-field"></div>
+    <div class="scanlines"></div>
+    <div class="noise"></div>
+    <div class="boot-curtain" id="boot-curtain"></div>
+
+    <!-- HUD 层 -->
+    <div class="hud-layer">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+
+        <div class="top-bar">
+            <div class="title">J.A.R.V.I.S</div>
+            <div class="subtitle">JUST A RATHER VERY INTELLIGENT SYSTEM // MARK VII</div>
+        </div>
+
+        <div class="top-meta left">
+            <span class="meta-index">SYS.01</span>
+            <span>STARK NEURAL INTERFACE</span>
+        </div>
+        <div class="top-meta right">
+            <span id="clock">--:--:--</span>
+            <span class="meta-index">CN-SH // LOCAL</span>
+        </div>
+
+        <div class="status-ring">
+            <div class="status-dot" id="status-dot"></div>
+            <div class="status-text" id="status-text">INITIALIZING</div>
+        </div>
+
+        <div class="hud-panel left" id="side-left">
+            <div class="panel-title"><span>SYSTEM LOAD</span><span>01</span></div>
+            <div class="metric">
+                <div class="metric-line"><span>CPU ARRAY</span><strong id="cpu-value">--%</strong></div>
+                <div class="meter"><i id="cpu-meter"></i></div>
+            </div>
+            <div class="metric">
+                <div class="metric-line"><span>MEMORY CORE</span><strong id="mem-value">--%</strong></div>
+                <div class="meter"><i id="mem-meter"></i></div>
+            </div>
+            <div class="metric">
+                <div class="metric-line"><span>NEURAL RTT</span><strong id="latency-value">-- MS</strong></div>
+                <div class="meter"><i id="latency-meter"></i></div>
+            </div>
+            <div class="metric-line"><span>UPTIME</span><strong id="uptime-value">00:00:00</strong></div>
+        </div>
+
+        <div class="hud-panel right" id="side-right">
+            <div class="panel-title"><span>MODULE MATRIX</span><span>07</span></div>
+            <div class="module-list">
+                <div class="module-row"><b>AUDIO ARRAY</b><span class="module-led" id="module-audio"></span></div>
+                <div class="module-row"><b>WHISPER STT</b><span class="module-led" id="module-stt"></span></div>
+                <div class="module-row"><b>DEEPSEEK LLM</b><span class="module-led" id="module-llm"></span></div>
+                <div class="module-row"><b>EDGE SYNTH</b><span class="module-led" id="module-tts"></span></div>
+            </div>
+            <div class="reasoning-feed" id="reasoning-feed">NEURAL PROCESSOR STANDBY<br>AWAITING SECURE QUERY...</div>
+        </div>
+
+        <div class="core-container">
+            <canvas class="spectrum-ring" id="spectrum-canvas" width="620" height="620"></canvas>
+            <div class="core-readout">
+                <div class="core-id">ARC // CORE</div>
+                <div class="core-state" id="core-state">BOOTING</div>
+                <div class="core-message" id="core-message">CALIBRATING NEURAL MATRIX</div>
+            </div>
+            <div class="orbit-label a">AUDIO SPECTRAL LINK</div>
+            <div class="orbit-label b">QUANTUM PROCESSOR</div>
+        </div>
+
+        <div class="wake-hint" id="wake-hint">SAY “HEY JARVIS” OR “贾维斯” · PRESS <kbd>SPACE</kbd> TO ENGAGE</div>
+
+        <div class="dialogue-panel" id="dialogue-panel">
+            <!-- 对话内容将动态插入 -->
+        </div>
+
+        <div class="bottom-bar">
+            <span><div class="indicator" id="ind-ws"></div> NEURAL LINK</span>
+            <span><div class="indicator" id="ind-mic"></div> MIC ARRAY</span>
+            <span><div class="indicator" id="ind-llm"></div> DEEPSEEK</span>
+            <span><div class="indicator" id="ind-vad"></div> VAD</span>
+            <span><div class="indicator active" id="ind-secure"></div> SECURE</span>
+        </div>
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script type="text/plain" id="legacy-ui">
+        /* ===== 配置 ===== */
+        const CONFIG = {
+            primary: '#00f0ff',
+            secondary: '#0066ff',
+            ice: '#6ee7ff',
+            bg: '#030508',
+            wsUrl: `ws://${window.location.host}/ws`,
+            particleCount: 80,
+            ringCount: 5,
+        };
+
+        /* ===== DOM 元素 ===== */
+        const bgCanvas = document.getElementById('bg-canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        const specCanvas = document.getElementById('spectrum-canvas');
+        const specCtx = specCanvas.getContext('2d');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const dialoguePanel = document.getElementById('dialogue-panel');
+        const wakeHint = document.getElementById('wake-hint');
+
+        /* ===== 状态 ===== */
+        let systemState = 'booting';
+        let spectrumData = new Array(64).fill(0);
+        let bootProgress = 0;
+        let bootComplete = false;
+        let wakeRipples = [];
+        let particles = [];
+        let rings = [];
+        let time = 0;
+
+        /* ===== WebSocket ===== */
+        let ws = null;
+        let reconnectTimer = null;
+        let currentResponseEl = null;
+        let currentResponseText = '';
+
+        function connectWebSocket() {
+            ws = new WebSocket(CONFIG.wsUrl);
+
+            ws.onopen = () => {
+                setIndicator('ws', true);
+                console.log('J.A.R.V.I.S 神经链路已建立');
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                setIndicator('ws', false);
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (err) => {
+                console.error('WebSocket 错误:', err);
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'state':
+                    setState(msg.state, msg.message);
+                    break;
+                case 'spectrum':
+                    spectrumData = msg.data;
+                    break;
+                case 'transcript':
+                    addDialogue('user', msg.text);
+                    break;
+                case 'response':
+                    if (msg.done) {
+                        finishResponse();
+                    } else {
+                        appendResponse(msg.delta || msg.text);
+                    }
+                    break;
+                case 'reasoning':
+                    // thinking 内容可以单独展示，这里仅记录
+                    console.log('thinking:', msg.text);
+                    break;
+                case 'info':
+                    console.log('info:', msg.message);
+                    break;
+            }
+        }
+
+        function sendCommand(command, payload = {}) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ command, ...payload }));
+            }
+        }
+
+        /* ===== UI 状态管理 ===== */
+        function setState(state, message) {
+            systemState = state;
+            statusText.textContent = message || state.toUpperCase();
+            statusDot.className = 'status-dot ' + state;
+
+            if (state === 'wake') {
+                spawnWakeRipple();
+                wakeHint.style.opacity = '0';
+            } else if (state === 'idle') {
+                wakeHint.style.opacity = '1';
+            } else {
+                wakeHint.style.opacity = '0.3';
+            }
+
+            // 更新侧边指示器
+            setIndicator('mic', ['listening', 'wake', 'speaking'].includes(state));
+            setIndicator('llm', state === 'thinking');
+            setIndicator('vad', state === 'listening');
+        }
+
+        function setIndicator(name, active) {
+            const el = document.getElementById('ind-' + name);
+            if (el) el.classList.toggle('active', active);
+        }
+
+        /* ===== 对话渲染 ===== */
+        function addDialogue(role, text) {
+            const line = document.createElement('div');
+            line.className = `dialogue-line ${role}`;
+            const label = role === 'user' ? 'YOU' : 'JARVIS';
+            line.innerHTML = `<span class="label">${label}</span><span class="text">${escapeHtml(text)}</span>`;
+            dialoguePanel.appendChild(line);
+            scrollDialogue();
+        }
+
+        function appendResponse(delta) {
+            if (!currentResponseEl) {
+                currentResponseEl = document.createElement('div');
+                currentResponseEl.className = 'dialogue-line jarvis';
+                currentResponseEl.innerHTML = '<span class="label">JARVIS</span><span class="text"></span><span class="typing-cursor"></span>';
+                dialoguePanel.appendChild(currentResponseEl);
+            }
+            currentResponseText += delta;
+            const textSpan = currentResponseEl.querySelector('.text');
+            textSpan.textContent = currentResponseText;
+            scrollDialogue();
+        }
+
+        function finishResponse() {
+            if (currentResponseEl) {
+                const cursor = currentResponseEl.querySelector('.typing-cursor');
+                if (cursor) cursor.remove();
+                currentResponseEl = null;
+                currentResponseText = '';
+            }
+        }
+
+        function scrollDialogue() {
+            while (dialoguePanel.children.length > 6) {
+                dialoguePanel.removeChild(dialoguePanel.firstChild);
+            }
+            dialoguePanel.scrollTop = dialoguePanel.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /* ===== 视觉系统 ===== */
+        function resize() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+            reset() {
+                this.x = Math.random() * bgCanvas.width;
+                this.y = Math.random() * bgCanvas.height;
+                this.z = Math.random() * 2 + 0.5;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = (Math.random() - 0.5) * 0.3;
+                this.alpha = Math.random() * 0.5 + 0.1;
+                this.size = Math.random() * 1.5 + 0.5;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > bgCanvas.width || this.y < 0 || this.y > bgCanvas.height) {
+                    this.reset();
+                }
+            }
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(0, 240, 255, ${this.alpha})`;
+                ctx.fill();
+            }
+        }
+
+        class Ring {
+            constructor(index, total) {
+                this.index = index;
+                this.total = total;
+                this.baseRadius = 60 + index * 35;
+                this.speed = (index % 2 === 0 ? 1 : -1) * (0.003 + index * 0.001);
+                this.angle = Math.random() * Math.PI * 2;
+                this.segments = 8 + index * 4;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+            }
+            update(dt) {
+                this.angle += this.speed * dt;
+                this.pulsePhase += 0.05;
+            }
+            draw(ctx, cx, cy, energy) {
+                const pulse = Math.sin(this.pulsePhase) * 5;
+                const radius = this.baseRadius + pulse + energy * 20;
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(this.angle);
+                ctx.beginPath();
+                const segAngle = (Math.PI * 2) / this.segments;
+                for (let i = 0; i < this.segments; i++) {
+                    const a = i * segAngle;
+                    const gap = segAngle * 0.3;
+                    ctx.arc(0, 0, radius, a, a + segAngle - gap);
+                }
+                ctx.strokeStyle = `rgba(0, 240, 255, ${0.15 + this.index * 0.05 + energy * 0.3})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function initVisuals() {
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                particles.push(new Particle());
+            }
+            for (let i = 0; i < CONFIG.ringCount; i++) {
+                rings.push(new Ring(i, CONFIG.ringCount));
+            }
+        }
+
+        function spawnWakeRipple() {
+            wakeRipples.push({
+                radius: 10,
+                alpha: 1,
+                width: 3,
+            });
+        }
+
+        function drawBootAnimation(ctx, cx, cy) {
+            const progress = bootProgress / 100;
+            const radius = 70;
+
+            // 外环进度
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+            ctx.strokeStyle = CONFIG.primary;
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = CONFIG.primary;
+            ctx.stroke();
+
+            // 内圈
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.65, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(0, 240, 255, ${0.2 + progress * 0.5})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 中心光点
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.2 * progress, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(0, 240, 255, ${progress})`;
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = CONFIG.primary;
+            ctx.fill();
+
+            // 启动文字
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = `rgba(0, 240, 255, ${progress})`;
+            ctx.font = '12px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText(`BOOT SEQUENCE ${Math.floor(bootProgress)}%`, 0, radius + 40);
+            ctx.restore();
+        }
+
+        function drawArcReactor(ctx, cx, cy, energy) {
+            const baseRadius = 50;
+
+            // 外发光
+            const gradient = ctx.createRadialGradient(cx, cy, 10, cx, cy, baseRadius * 2.5);
+            gradient.addColorStop(0, 'rgba(0, 240, 255, 0.4)');
+            gradient.addColorStop(0.5, 'rgba(0, 102, 255, 0.1)');
+            gradient.addColorStop(1, 'rgba(0, 102, 255, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(cx - baseRadius * 2.5, cy - baseRadius * 2.5, baseRadius * 5, baseRadius * 5);
+
+            // 核心
+            ctx.beginPath();
+            ctx.arc(cx, cy, baseRadius * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = '#e0f7ff';
+            ctx.shadowBlur = 40 + energy * 30;
+            ctx.shadowColor = CONFIG.primary;
+            ctx.fill();
+
+            // 内环
+            ctx.beginPath();
+            ctx.arc(cx, cy, baseRadius * 0.6, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(0, 240, 255, ${0.6 + energy * 0.4})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 8个三角形扇叶
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 + time * 0.001;
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(angle);
+                ctx.beginPath();
+                ctx.moveTo(baseRadius * 0.7, -8);
+                ctx.lineTo(baseRadius * 1.1, 0);
+                ctx.lineTo(baseRadius * 0.7, 8);
+                ctx.closePath();
+                ctx.fillStyle = `rgba(0, 240, 255, ${0.3 + energy * 0.5})`;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // 外环
+            ctx.beginPath();
+            ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(0, 240, 255, ${0.4 + energy * 0.4})`;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([20, 10]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function drawRipples(ctx, cx, cy) {
+            for (let i = wakeRipples.length - 1; i >= 0; i--) {
+                const r = wakeRipples[i];
+                ctx.beginPath();
+                ctx.arc(cx, cy, r.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(0, 240, 255, ${r.alpha})`;
+                ctx.lineWidth = r.width;
+                ctx.stroke();
+                r.radius += 6;
+                r.alpha -= 0.015;
+                r.width *= 0.98;
+                if (r.alpha <= 0) {
+                    wakeRipples.splice(i, 1);
+                }
+            }
+        }
+
+        function drawSpectrum(ctx, cx, cy) {
+            const bars = spectrumData.length;
+            const innerR = 130;
+            const maxLen = 90;
+            const avgEnergy = spectrumData.reduce((a, b) => a + b, 0) / bars;
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            for (let i = 0; i < bars; i++) {
+                const angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
+                const value = spectrumData[i] || 0;
+                const len = value * maxLen;
+                const x1 = Math.cos(angle) * innerR;
+                const y1 = Math.sin(angle) * innerR;
+                const x2 = Math.cos(angle) * (innerR + len);
+                const y2 = Math.sin(angle) * (innerR + len);
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = `rgba(0, 240, 255, ${0.2 + value * 0.8})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            return avgEnergy;
+        }
+
+        function drawBackgroundGrid(ctx) {
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+            const gridSize = 60;
+            const perspective = 0.6;
+
+            ctx.strokeStyle = 'rgba(0, 102, 255, 0.08)';
+            ctx.lineWidth = 1;
+
+            // 水平线（透视）
+            for (let y = h / 2; y < h; y += gridSize) {
+                const factor = (y - h / 2) / (h / 2);
+                ctx.globalAlpha = factor * 0.5;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+
+            // 垂直线
+            for (let x = 0; x <= w; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, h / 2);
+                ctx.lineTo(x + (x - w / 2) * perspective, h);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function render() {
+            time += 16;
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+
+            // 清空（带拖尾效果）
+            bgCtx.fillStyle = 'rgba(3, 5, 8, 0.25)';
+            bgCtx.fillRect(0, 0, w, h);
+
+            // 透视网格
+            drawBackgroundGrid(bgCtx);
+
+            // 粒子
+            particles.forEach(p => {
+                p.update();
+                p.draw(bgCtx);
+            });
+
+            // 计算当前能量
+            const avgEnergy = spectrumData.reduce((a, b) => a + b, 0) / spectrumData.length;
+
+            // 旋转环
+            rings.forEach(ring => {
+                ring.update(16);
+                ring.draw(bgCtx, cx, cy, avgEnergy);
+            });
+
+            // 开机画面 or 主核心
+            if (!bootComplete) {
+                bootProgress += 0.8;
+                if (bootProgress >= 100) {
+                    bootProgress = 100;
+                    bootComplete = true;
+                    setTimeout(() => spawnWakeRipple(), 200);
+                }
+                drawBootAnimation(bgCtx, cx, cy);
+            } else {
+                drawArcReactor(bgCtx, cx, cy, avgEnergy);
+                drawRipples(bgCtx, cx, cy);
+            }
+
+            // 频谱环
+            specCtx.clearRect(0, 0, specCanvas.width, specCanvas.height);
+            drawSpectrum(specCtx, specCanvas.width / 2, specCanvas.height / 2);
+
+            requestAnimationFrame(render);
+        }
+
+        /* ===== 键盘交互 ===== */
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                sendCommand('wakeup');
+            } else if (e.code === 'Escape') {
+                sendCommand('stop');
+            }
+        });
+
+        document.addEventListener('click', () => {
+            if (systemState === 'idle') {
+                sendCommand('wakeup');
+            }
+        });
+
+        /* ===== 初始化 ===== */
+        initVisuals();
+        connectWebSocket();
+        render();
+
+        // 模拟系统数据更新
+        setInterval(() => {
+            const right = document.getElementById('side-right');
+            const latency = Math.floor(Math.random() * 120 + 40);
+            const cpu = Math.floor(Math.random() * 25 + 5);
+            const mem = Math.floor(Math.random() * 20 + 30);
+            right.innerHTML = `LATENCY: ${latency} ms<br>CPU: ${cpu} %<br>MEM: ${mem} %<br>VAD: ${systemState === 'listening' ? 'ACTIVE' : 'STANDBY'}`;
+        }, 1000);
+    </script>
+    <script>
+        (() => {
+            "use strict";
+
+            const CONFIG = {
+                primary: "73,246,255",
+                secondary: "8,124,255",
+                wsUrl: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
+                particles: 96,
+                reconnectDelay: 2400,
+            };
+
+            const STATE = {
+                booting:      { label: "BOOTING",    message: "CALIBRATING NEURAL MATRIX", color: "73,246,255", speed: .45 },
+                idle:         { label: "STANDBY",    message: "AWAITING VOICE AUTHORIZATION", color: "73,246,255", speed: .22 },
+                wake:         { label: "ENGAGED",    message: "VOICE SIGNATURE ACQUIRED", color: "255,255,255", speed: 2.4 },
+                listening:    { label: "LISTENING",  message: "AUDIO ARRAY FOCUSED", color: "77,255,189", speed: 1.05 },
+                thinking:     { label: "PROCESSING", message: "SYNTHESIZING RESPONSE", color: "255,196,90", speed: 1.65 },
+                speaking:     { label: "TRANSMIT",   message: "VOCAL SYNTHESIS ACTIVE", color: "139,233,255", speed: .82 },
+                disconnected: { label: "LINK LOST",  message: "RECONNECTING NEURAL UPLINK", color: "255,91,118", speed: .12 },
+            };
+
+            const $ = (id) => document.getElementById(id);
+            const bgCanvas = $("bg-canvas");
+            const bgCtx = bgCanvas.getContext("2d");
+            const specCanvas = $("spectrum-canvas");
+            const specCtx = specCanvas.getContext("2d");
+            const coreContainer = document.querySelector(".core-container");
+            const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+            let ws = null;
+            let reconnectTimer = null;
+            let toastTimer = null;
+            let currentResponseEl = null;
+            let currentResponseText = "";
+            let systemState = "booting";
+            let pendingState = { state: "idle", message: "" };
+            let backendMessage = "";
+            let spectrumTarget = new Array(64).fill(0);
+            let spectrumSmooth = new Array(64).fill(0);
+            let ripples = [];
+            let particles = [];
+            let logicalWidth = innerWidth;
+            let logicalHeight = innerHeight;
+            let specSize = 620;
+            let dpr = 1;
+            let animationTime = 0;
+            let lastFrame = performance.now();
+            let bootStarted = performance.now();
+            let bootComplete = false;
+            let pointerX = 0;
+            let pointerY = 0;
+            let latency = null;
+
+            class Particle {
+                constructor() { this.reset(true); }
+                reset(initial = false) {
+                    this.x = Math.random() * logicalWidth;
+                    this.y = initial ? Math.random() * logicalHeight : logicalHeight + 20;
+                    this.depth = Math.random() * .8 + .2;
+                    this.size = Math.random() * 1.2 + .25;
+                    this.alpha = Math.random() * .42 + .08;
+                    this.speed = Math.random() * .08 + .025;
+                    this.phase = Math.random() * Math.PI * 2;
+                }
+                update(dt) {
+                    this.y -= dt * this.speed * this.depth;
+                    this.x += Math.sin(animationTime * .00025 + this.phase) * .05 * dt;
+                    if (this.y < -20 || this.x < -40 || this.x > logicalWidth + 40) this.reset();
+                }
+                draw(ctx) {
+                    const px = this.x + pointerX * 9 * this.depth;
+                    const py = this.y + pointerY * 6 * this.depth;
+                    ctx.beginPath();
+                    ctx.arc(px, py, this.size * this.depth, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${CONFIG.primary},${this.alpha * this.depth})`;
+                    ctx.fill();
+                }
+            }
+
+            function resize() {
+                dpr = Math.min(devicePixelRatio || 1, 2);
+                logicalWidth = innerWidth;
+                logicalHeight = innerHeight;
+                bgCanvas.width = Math.round(logicalWidth * dpr);
+                bgCanvas.height = Math.round(logicalHeight * dpr);
+                bgCanvas.style.width = `${logicalWidth}px`;
+                bgCanvas.style.height = `${logicalHeight}px`;
+
+                const rect = coreContainer.getBoundingClientRect();
+                specSize = Math.max(280, Math.round(rect.width));
+                specCanvas.width = Math.round(specSize * dpr);
+                specCanvas.height = Math.round(specSize * dpr);
+                specCanvas.style.width = `${specSize}px`;
+                specCanvas.style.height = `${specSize}px`;
+            }
+
+            function initializeParticles() {
+                particles = Array.from({ length: reducedMotion ? 36 : CONFIG.particles }, () => new Particle());
+            }
+
+            function connectWebSocket() {
+                if (ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ws.readyState)) return;
+                ws = new WebSocket(CONFIG.wsUrl);
+
+                ws.onopen = () => {
+                    setIndicator("ws", true);
+                    showToast("NEURAL LINK ESTABLISHED");
+                    sendCommand("ping", { timestamp: Date.now() });
+                };
+
+                ws.onmessage = (event) => {
+                    try { handleMessage(JSON.parse(event.data)); }
+                    catch (error) { console.warn("Invalid neural packet", error); }
+                };
+
+                ws.onclose = () => {
+                    setIndicator("ws", false);
+                    applyState("disconnected", "神经链路断开，正在重新连接");
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(connectWebSocket, CONFIG.reconnectDelay);
+                };
+
+                ws.onerror = () => ws.close();
+            }
+
+            function handleMessage(msg) {
+                switch (msg.type) {
+                    case "state":
+                        pendingState = { state: msg.state, message: msg.message || "" };
+                        if (bootComplete) applyState(msg.state, msg.message);
+                        break;
+                    case "spectrum":
+                        if (Array.isArray(msg.data)) spectrumTarget = msg.data.slice(0, 64);
+                        break;
+                    case "transcript":
+                        addDialogue("user", msg.text);
+                        break;
+                    case "response":
+                        msg.done ? finishResponse() : appendResponse(msg.delta || msg.text || "");
+                        break;
+                    case "reasoning":
+                        updateReasoning(msg.text);
+                        break;
+                    case "telemetry":
+                        updateTelemetry(msg);
+                        break;
+                    case "info":
+                        showToast(msg.message || "SYSTEM MESSAGE RECEIVED");
+                        break;
+                    case "pong":
+                        if (Number.isFinite(msg.timestamp)) {
+                            latency = Math.max(0, Date.now() - msg.timestamp);
+                            updateLatency(latency);
+                        }
+                        break;
+                }
+            }
+
+            function sendCommand(command, payload = {}) {
+                if (ws?.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ command, ...payload }));
+                    return true;
+                }
+                showToast("NEURAL LINK UNAVAILABLE");
+                return false;
+            }
+
+            function applyState(state, message = "") {
+                if (!STATE[state]) state = "idle";
+                systemState = state;
+                backendMessage = message || "";
+                document.body.dataset.state = state;
+                $("status-dot").className = `status-dot ${state}`;
+                $("status-text").textContent = STATE[state].label;
+                $("core-state").textContent = STATE[state].label;
+                $("core-message").textContent = message || STATE[state].message;
+
+                const engaged = ["wake", "listening", "thinking", "speaking"].includes(state);
+                $("wake-hint").style.opacity = state === "idle" ? "1" : engaged ? ".18" : ".4";
+                setIndicator("mic", ["wake", "listening", "speaking"].includes(state));
+                setIndicator("llm", state === "thinking");
+                setIndicator("vad", state === "listening");
+
+                if (state === "wake") {
+                    for (let i = 0; i < 3; i++) {
+                        setTimeout(() => spawnRipple(i * 14), i * 90);
+                    }
+                }
+                if (state === "thinking") updateReasoning("DECOMPOSING QUERY\nRUNNING COGNITIVE INFERENCE...");
+                if (state === "idle" && backendMessage) showToast(backendMessage);
+            }
+
+            function setIndicator(name, active) {
+                $(`ind-${name}`)?.classList.toggle("active", Boolean(active));
+            }
+
+            function setModule(name, active) {
+                $(`module-${name}`)?.classList.toggle("active", Boolean(active));
+            }
+
+            function updateTelemetry(data) {
+                const cpu = clamp(Number(data.cpu) || 0, 0, 100);
+                const memory = clamp(Number(data.memory) || 0, 0, 100);
+                $("cpu-value").textContent = `${cpu.toFixed(1)}%`;
+                $("mem-value").textContent = `${memory.toFixed(1)}%`;
+                $("cpu-meter").style.width = `${cpu}%`;
+                $("mem-meter").style.width = `${memory}%`;
+                $("uptime-value").textContent = formatDuration(Number(data.uptime) || 0);
+                setModule("audio", Boolean(data.audio_ready));
+                setModule("stt", Boolean(data.stt_ready));
+                setModule("llm", Boolean(data.llm_ready));
+                setModule("tts", Boolean(data.tts_ready));
+            }
+
+            function updateLatency(value) {
+                $("latency-value").textContent = `${Math.round(value)} MS`;
+                $("latency-meter").style.width = `${clamp(value / 3, 2, 100)}%`;
+            }
+
+            function formatDuration(totalSeconds) {
+                const total = Math.max(0, Math.floor(totalSeconds));
+                const hours = String(Math.floor(total / 3600)).padStart(2, "0");
+                const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+                const seconds = String(total % 60).padStart(2, "0");
+                return `${hours}:${minutes}:${seconds}`;
+            }
+
+            function addDialogue(role, text) {
+                if (!text) return;
+                const line = document.createElement("div");
+                line.className = `dialogue-line ${role}`;
+                const label = document.createElement("span");
+                label.className = "label";
+                label.textContent = role === "user" ? "OPERATOR" : "JARVIS";
+                const body = document.createElement("span");
+                body.className = "text";
+                body.textContent = text;
+                line.append(label, body);
+                $("dialogue-panel").appendChild(line);
+                trimDialogue();
+            }
+
+            function appendResponse(delta) {
+                if (!delta) return;
+                if (!currentResponseEl) {
+                    currentResponseEl = document.createElement("div");
+                    currentResponseEl.className = "dialogue-line jarvis";
+                    const label = document.createElement("span");
+                    label.className = "label";
+                    label.textContent = "JARVIS";
+                    const text = document.createElement("span");
+                    text.className = "text";
+                    const cursor = document.createElement("span");
+                    cursor.className = "typing-cursor";
+                    currentResponseEl.append(label, text, cursor);
+                    $("dialogue-panel").appendChild(currentResponseEl);
+                }
+                currentResponseText += delta;
+                currentResponseEl.querySelector(".text").textContent = currentResponseText;
+                trimDialogue();
+            }
+
+            function finishResponse() {
+                currentResponseEl?.querySelector(".typing-cursor")?.remove();
+                currentResponseEl = null;
+                currentResponseText = "";
+            }
+
+            function trimDialogue() {
+                const panel = $("dialogue-panel");
+                while (panel.children.length > 4) panel.firstElementChild.remove();
+                panel.scrollTop = panel.scrollHeight;
+            }
+
+            function updateReasoning(text) {
+                if (!text) return;
+                $("reasoning-feed").textContent = text.slice(-220);
+            }
+
+            function showToast(message) {
+                const toast = $("toast");
+                toast.textContent = message;
+                toast.classList.add("visible");
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => toast.classList.remove("visible"), 2600);
+            }
+
+            function spawnRipple(offset = 0) {
+                ripples.push({ radius: 72 + offset, alpha: .85, speed: 2.7 + offset * .015 });
+            }
+
+            function drawBackground(ctx, dt) {
+                const w = logicalWidth;
+                const h = logicalHeight;
+                const cx = w / 2 + pointerX * 13;
+                const horizon = h * .47 + pointerY * 7;
+
+                ctx.fillStyle = "rgba(1,4,10,.32)";
+                ctx.fillRect(0, 0, w, h);
+
+                const halo = ctx.createRadialGradient(cx, h * .46, 20, cx, h * .46, Math.min(w, h) * .58);
+                halo.addColorStop(0, `rgba(${STATE[systemState].color},.07)`);
+                halo.addColorStop(.45, "rgba(8,124,255,.025)");
+                halo.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = halo;
+                ctx.fillRect(0, 0, w, h);
+
+                ctx.save();
+                ctx.strokeStyle = "rgba(24,147,222,.11)";
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 13; i++) {
+                    const p = i / 12;
+                    const y = horizon + Math.pow(p, 1.72) * (h - horizon);
+                    ctx.globalAlpha = .12 + p * .38;
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                }
+                for (let i = -12; i <= 12; i++) {
+                    ctx.globalAlpha = .22;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + i * 20, horizon);
+                    ctx.lineTo(cx + i * w * .13, h);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                particles.forEach((particle) => {
+                    particle.update(dt);
+                    particle.draw(ctx);
+                });
+
+                ctx.save();
+                ctx.translate(cx, h * .47);
+                ctx.scale(1, .33);
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, 210 + i * 62, 210 + i * 62, animationTime * .00005 * (i % 2 ? -1 : 1), 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(${i % 2 ? CONFIG.secondary : CONFIG.primary},${.075 - i * .01})`;
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4 + i * 3, 20 + i * 5]);
+                    ctx.lineDashOffset = animationTime * .018 * (i % 2 ? -1 : 1);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            function drawSpectrumInterface(ctx, now, dt) {
+                const state = STATE[systemState];
+                const cx = specSize / 2;
+                const cy = specSize / 2;
+                const base = specSize * .166;
+                const scale = specSize / 620;
+                const stateSpeed = state.speed * (reducedMotion ? .08 : 1);
+
+                ctx.clearRect(0, 0, specSize, specSize);
+                spectrumSmooth = spectrumSmooth.map((value, i) => {
+                    let target = spectrumTarget[i] || 0;
+                    if (systemState === "speaking") target = Math.max(target, .12 + .17 * Math.abs(Math.sin(now * .008 + i * .43)));
+                    if (systemState === "thinking") target = Math.max(target * .35, .06 + ((i + Math.floor(now / 80)) % 11 === 0 ? .2 : 0));
+                    if (systemState === "idle") target *= .38;
+                    return value + (target - value) * Math.min(1, dt * .014);
+                });
+                const energy = spectrumSmooth.reduce((sum, n) => sum + n, 0) / spectrumSmooth.length;
+
+                ctx.save();
+                ctx.translate(cx, cy);
+
+                const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, base * 1.72);
+                glow.addColorStop(0, `rgba(${state.color},${.22 + energy * .25})`);
+                glow.addColorStop(.35, `rgba(${state.color},.055)`);
+                glow.addColorStop(1, `rgba(${state.color},0)`);
+                ctx.fillStyle = glow;
+                ctx.fillRect(-base * 1.8, -base * 1.8, base * 3.6, base * 3.6);
+
+                drawOrbit(ctx, base * 2.42, now * .00010 * stateSpeed, 96, state.color, .17);
+                drawOrbit(ctx, base * 2.05, -now * .00018 * stateSpeed, 48, CONFIG.primary, .2);
+                drawOrbit(ctx, base * 1.72, now * .00028 * stateSpeed, 24, state.color, .29);
+
+                ctx.save();
+                ctx.rotate(-now * .00011 * stateSpeed);
+                const innerR = base * 1.38;
+                const maxLength = base * .48;
+                spectrumSmooth.forEach((value, i) => {
+                    const angle = (i / spectrumSmooth.length) * Math.PI * 2;
+                    const length = 3 + value * maxLength;
+                    ctx.save();
+                    ctx.rotate(angle);
+                    ctx.beginPath();
+                    ctx.moveTo(innerR, 0);
+                    ctx.lineTo(innerR + length, 0);
+                    ctx.strokeStyle = `rgba(${state.color},${.16 + value * .84})`;
+                    ctx.lineWidth = Math.max(1, 1.45 * scale);
+                    ctx.shadowBlur = value * 9;
+                    ctx.shadowColor = `rgb(${state.color})`;
+                    ctx.stroke();
+                    ctx.restore();
+                });
+                ctx.restore();
+
+                ctx.save();
+                ctx.rotate(now * .00035 * stateSpeed);
+                for (let i = 0; i < 12; i++) {
+                    const a = i / 12 * Math.PI * 2;
+                    ctx.save();
+                    ctx.rotate(a);
+                    ctx.beginPath();
+                    ctx.moveTo(base * .72, -base * .12);
+                    ctx.lineTo(base * 1.03, 0);
+                    ctx.lineTo(base * .72, base * .12);
+                    ctx.closePath();
+                    ctx.fillStyle = `rgba(${state.color},${.14 + energy * .42})`;
+                    ctx.fill();
+                    ctx.restore();
+                }
+                ctx.restore();
+
+                ctx.beginPath();
+                ctx.arc(0, 0, base * .68, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${state.color},.55)`;
+                ctx.lineWidth = 1.4 * scale;
+                ctx.setLineDash([base * .18, base * .06]);
+                ctx.lineDashOffset = -now * .025 * stateSpeed;
+                ctx.shadowBlur = 9;
+                ctx.shadowColor = `rgb(${state.color})`;
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const core = ctx.createRadialGradient(-base * .08, -base * .1, 1, 0, 0, base * .48);
+                core.addColorStop(0, "rgba(255,255,255,.96)");
+                core.addColorStop(.17, `rgba(${state.color},.86)`);
+                core.addColorStop(.55, `rgba(${state.color},.18)`);
+                core.addColorStop(1, `rgba(${state.color},0)`);
+                ctx.fillStyle = core;
+                ctx.beginPath();
+                ctx.arc(0, 0, base * (.46 + energy * .06), 0, Math.PI * 2);
+                ctx.fill();
+
+                ripples.forEach((ripple) => {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, ripple.radius * scale, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(${state.color},${ripple.alpha})`;
+                    ctx.lineWidth = Math.max(1, 1.5 * ripple.alpha * scale);
+                    ctx.stroke();
+                    ripple.radius += ripple.speed * dt * .06;
+                    ripple.alpha -= dt * .0007;
+                });
+                ripples = ripples.filter((ripple) => ripple.alpha > 0);
+
+                if (!bootComplete) drawBootSequence(ctx, now, base, state.color);
+                ctx.restore();
+            }
+
+            function drawOrbit(ctx, radius, rotation, segments, color, alpha) {
+                ctx.save();
+                ctx.rotate(rotation);
+                const arc = Math.PI * 2 / segments;
+                for (let i = 0; i < segments; i++) {
+                    if (i % 3 === 1) continue;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, radius, i * arc, i * arc + arc * (i % 5 === 0 ? .86 : .42));
+                    ctx.strokeStyle = `rgba(${color},${i % 5 === 0 ? alpha * 1.8 : alpha})`;
+                    ctx.lineWidth = i % 5 === 0 ? 1.6 : .8;
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            function drawBootSequence(ctx, now, base, color) {
+                const progress = clamp((now - bootStarted) / (reducedMotion ? 400 : 2300), 0, 1);
+                ctx.beginPath();
+                ctx.arc(0, 0, base * 1.17, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+                ctx.strokeStyle = `rgba(${color},.9)`;
+                ctx.lineWidth = 2;
+                ctx.shadowBlur = 14;
+                ctx.shadowColor = `rgb(${color})`;
+                ctx.stroke();
+                $("core-message").textContent = `BOOT SEQUENCE ${String(Math.floor(progress * 100)).padStart(3, "0")}%`;
+                if (progress >= 1 && !bootComplete) {
+                    bootComplete = true;
+                    $("boot-curtain").classList.add("done");
+                    applyState(pendingState.state, pendingState.message);
+                    spawnRipple();
+                }
+            }
+
+            function render(now) {
+                const dt = Math.min(40, now - lastFrame || 16);
+                lastFrame = now;
+                animationTime += dt;
+
+                bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                drawBackground(bgCtx, dt);
+                specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                drawSpectrumInterface(specCtx, now, dt);
+                requestAnimationFrame(render);
+            }
+
+            function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+            addEventListener("resize", resize);
+            addEventListener("pointermove", (event) => {
+                pointerX = (event.clientX / innerWidth - .5) * 2;
+                pointerY = (event.clientY / innerHeight - .5) * 2;
+            });
+
+            document.addEventListener("keydown", (event) => {
+                if (event.code === "Space") {
+                    event.preventDefault();
+                    if (systemState === "idle") sendCommand("wakeup");
+                } else if (event.code === "Escape") {
+                    sendCommand("stop");
+                } else if (event.key.toLowerCase() === "c" && (event.metaKey || event.ctrlKey)) {
+                    sendCommand("clear_history");
+                }
+            });
+
+            coreContainer.addEventListener("click", () => {
+                if (systemState === "idle") sendCommand("wakeup");
+            });
+
+            setInterval(() => {
+                $("clock").textContent = new Date().toLocaleTimeString("en-GB", { hour12: false });
+                if (ws?.readyState === WebSocket.OPEN) sendCommand("ping", { timestamp: Date.now() });
+            }, 2500);
+
+            document.body.dataset.state = "booting";
+            resize();
+            initializeParticles();
+            setModule("audio", false);
+            setModule("stt", false);
+            connectWebSocket();
+            requestAnimationFrame(render);
+        })();
+    </script>
+</body>
+</html>

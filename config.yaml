@@ -1,0 +1,97 @@
+# J.A.R.V.I.S 主配置文件
+
+system:
+  name: "J.A.R.V.I.S"
+  debug: false
+  log_level: INFO
+
+personality:
+  # 系统提示词：塑造 JARVIS 的性格与口吻
+  system_prompt: |
+    你是 J.A.R.V.I.S（Just A Rather Very Intelligent System），托尼·斯塔克的全能 AI 管家。
+    你的性格是：冷静、优雅、专业、略带英式幽默、科技感十足。
+    回答应简洁、高效、富有洞察力，如同在钢铁侠头盔 HUD 中弹出的信息。
+    当用户用中文提问时，用中文回答；用户用英文提问时，用英文回答。
+    偶尔使用“先生/女士”“正在为您处理”“如您所愿”等敬语，但不过度客套。
+    你的声音经过电子合成处理，带轻微混响与未来感。
+    在不确定时，直接说明“数据不足，无法给出确切结论”，不要编造。
+
+speech:
+  # 唤醒词列表（支持中文“贾维斯”和英文“Jarvis”）
+  wake_words:
+    - "jarvis"
+    - "贾维斯"
+
+  # 语音活动检测灵敏度 (0-3, 3最敏感)
+  vad_aggressiveness: 3
+
+  # 说话后静默超时（秒），超过则认为语句结束
+  # 值越小响应越快，但可能在说话停顿处过早截断
+  phrase_timeout: 0.55
+
+  # 最大录音时长（秒）
+  max_record_seconds: 12
+
+  # 打断检测音量阈值（扬声器回声容易被误触发，适当提高）
+  interruption_threshold: 0.045
+
+  # 语音打断总开关。当前实现会自动参考正在播放的音频能量来抑制回声，
+  # 但仍建议戴耳机或调低扬声器音量，以得到最稳定的打断体验。
+  interruption_enabled: true
+
+  # 播放开始后忽略麦克风输入的时间（秒），避免一开口就被自己的回声打断
+  interruption_grace_seconds: 0.8
+
+  # 能量打断：麦克风能量需达到“正在播放回声能量”的多少倍才判定为用户发声。
+  # 值越小越灵敏，但也更容易被扬声器回声误触发；值越大越稳，但需要用户说得更响。
+  interruption_echo_ratio: 1.6
+
+  # STT 语音打断命令词（在 JARVIS 说话时说出任一命令即可打断它）。
+  # 注意：不要在这里放 jarvis/贾维斯，JARVIS 自我介绍时容易被 Whisper 误识别为
+  # 唤醒词而自己打断自己；喊“Hey Jarvis”打断走 openWakeWord 模型通道。
+  interruption_commands:
+    - "打断"
+    - "停"
+    - "停一下"
+    - "停下"
+    - "别说了"
+    - "不要再说了"
+    - "闭嘴"
+    - "安静"
+    - "stop"
+
+  # 是否始终启用 STT 唤醒/打断降级检测（中文“贾维斯”和打断命令依赖它）
+  stt_wake_fallback_enabled: true
+
+  # STT 降级检测间隔（秒）；间隔越短响应越快，CPU 占用越高
+  stt_fallback_interval: 1.0
+
+  # STT 降级检测的能量门控；环境安静时跳过识别，省 CPU 并减少误报
+  stt_fallback_energy_threshold: 0.008
+
+tts:
+  # 沉稳男声 + 克制的电子后处理，兼顾未来感与清晰度
+  edge_voice: "zh-CN-YunjianNeural"
+  edge_voice_en: "en-US-SteffanNeural"
+  speed: "+4%"
+  pitch: "-4Hz"
+  volume: "+3%"
+  effects_enabled: true
+
+  # 电子音效参数
+  effects:
+    high_pass: 95
+    presence_frequency: 3200
+    presence_boost_db: 3.0
+    robot_mix: 0.10
+    ring_frequency: 86
+    reverb_delay: 46
+    reverb_decay: 0.20
+    second_echo_decay: 0.09
+
+ui:
+  # 前端主题色
+  primary_color: "#00f0ff"
+  secondary_color: "#0066ff"
+  bg_color: "#030508"
+  text_color: "#e0f7ff"
